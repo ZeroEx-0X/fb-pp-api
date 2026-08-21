@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     await new Promise((resolve, reject) => {
       if (type === "audio") {
         ffmpeg()
-          .input("color=c=black:s=640x360:r=25")
+          .input("color=c=black:s=640x180:r=25")
           .inputOptions(["-f lavfi"])
           .input(inputPath)
           .outputOptions([
