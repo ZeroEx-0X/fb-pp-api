@@ -1,7 +1,27 @@
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage, GlobalFonts } from "@napi-rs/canvas";
+import axios from "axios";
+
+async function loadFonts() {
+  try {
+    const bnFontRes = await axios.get(
+      "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansbengali/NotoSansBengali-Bold.ttf",
+      { responseType: "arraybuffer" }
+    );
+    GlobalFonts.register(Buffer.from(bnFontRes.data), "CustomFont");
+
+    const enFontRes = await axios.get(
+      "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto-Bold.ttf",
+      { responseType: "arraybuffer" }
+    );
+    GlobalFonts.register(Buffer.from(enFontRes.data), "RobotoFont");
+  } catch (e) {
+    console.error("Font loading error:", e.message);
+  }
+}
+
+let fontsLoaded = false;
 
 export default async function handler(req, res) {
-  // শুধুমাত্র POST Request এলাউ করা
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed. Use POST." });
   }
@@ -13,16 +33,19 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (!fontsLoaded) {
+      await loadFonts();
+      fontsLoaded = true;
+    }
+
     const canvas = createCanvas(1000, 850);
     const ctx = canvas.getContext("2d");
 
-    // ব্যাকগ্রাউন্ড
     ctx.fillStyle = "#0a0a0a";
     ctx.fillRect(0, 0, 1000, 850);
 
-    // টাইটেল ও ডিভাইডার
     ctx.fillStyle = "#FF0000";
-    ctx.font = "bold 50px sans-serif";
+    ctx.font = 'bold 50px CustomFont, RobotoFont';
     ctx.fillText("YouTube Music", 50, 80);
 
     ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
@@ -32,7 +55,6 @@ export default async function handler(req, res) {
     ctx.lineTo(950, 120);
     ctx.stroke();
 
-    // থাম্বনেইলগুলো সমান্তরালে লোড করা
     const thumbPromises = results.map(song =>
       song.thumbnail ? loadImage(song.thumbnail).catch(() => null) : null
     );
@@ -43,16 +65,13 @@ export default async function handler(req, res) {
     for (let i = 0; i < results.length; i++) {
       const song = results[i];
 
-      // ক্রমিক নম্বর
       ctx.fillStyle = "#FF0000";
-      ctx.font = "bold 35px sans-serif";
+      ctx.font = 'bold 35px CustomFont, RobotoFont';
       ctx.fillText(`${i + 1}`, 50, y + 60);
 
-      // থাম্বনেইল রেন্ডার
       if (thumbnails[i]) {
         ctx.save();
         ctx.beginPath();
-        // Rounded Rect for thumbnail
         const rx = 120, ry = y, rw = 100, rh = 100, radius = 10;
         ctx.moveTo(rx + radius, ry);
         ctx.arcTo(rx + rw, ry, rx + rw, ry + rh, radius);
@@ -66,18 +85,16 @@ export default async function handler(req, res) {
         ctx.restore();
       }
 
-      // টাইটেল
       ctx.fillStyle = "#FFFFFF";
-      ctx.font = "bold 30px sans-serif";
-      let title = song.title || "Unknown";
+      ctx.font = 'bold 30px CustomFont, RobotoFont';
+      let title = song.title || "Unknown Title";
       if (ctx.measureText(title).width > 650) {
         title = title.slice(0, 35) + "...";
       }
       ctx.fillText(title, 250, y + 40);
 
-      // আর্টস্ট ও ডিউরেশন
       ctx.fillStyle = "#aaaaaa";
-      ctx.font = "24px sans-serif";
+      ctx.font = '24px CustomFont, RobotoFont';
       const duration = song.durationText || song.duration || "N/A";
       const artist = song.artist || "Unknown Artist";
       ctx.fillText(`${artist} • ${duration}`, 250, y + 85);
@@ -85,10 +102,7 @@ export default async function handler(req, res) {
       y += 130;
     }
 
-    // ইমেজ বাফার তৈরি করা
     const imageBuffer = await canvas.toBuffer("image/png");
-
-    // PNG ইমেজ রেসপন্স পাঠানো
     res.setHeader("Content-Type", "image/png");
     return res.send(imageBuffer);
 
