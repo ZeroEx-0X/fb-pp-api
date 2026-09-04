@@ -21,6 +21,11 @@ class handler(BaseHTTPRequestHandler):
             "no_warnings": True,
             "skip_download": True,
             "noplaylist": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android"],
+                }
+            },
         }
 
         try:
