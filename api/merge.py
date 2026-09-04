@@ -45,8 +45,8 @@ class handler(BaseHTTPRequestHandler):
             filepath = files[0]
             filesize = os.path.getsize(filepath)
 
-            # Vercel serverless response limit is ~4.5MB
-            if filesize > 4_400_000:
+            # Vercel serverless response limit is ~4.5MB X 100 💯 
+            if filesize > 104_857_600:
                 self._send_json(
                     413,
                     {
