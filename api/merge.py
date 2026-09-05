@@ -27,10 +27,15 @@ class handler(BaseHTTPRequestHandler):
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
-            "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "format": "bestvideo+bestaudio/best",
             "merge_output_format": "mp4",
             "outtmpl": outtmpl,
             "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(),
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android"],
+                }
+            },
         }
 
         try:
@@ -45,7 +50,7 @@ class handler(BaseHTTPRequestHandler):
             filepath = files[0]
             filesize = os.path.getsize(filepath)
 
-            # Vercel serverless response limit is ~4.5MB X 100 💯 
+            # Vercel serverless response limit is ~4.5MB X 100 💯
             if filesize > 104_857_600:
                 self._send_json(
                     413,
