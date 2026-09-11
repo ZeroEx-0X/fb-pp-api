@@ -1,4 +1,6 @@
-import axios from 'axios';
+import formidable from "formidable";
+import fs from "fs";
+import FormData from "form-data";
 
 export const config = {
   api: {
@@ -7,76 +9,82 @@ export const config = {
 };
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  if (req.method !== "POST") {
+    return res.status(405).json({
+      success: false,
+      error: "Method Not Allowed",
+    });
   }
 
-  // Handle URL or File via POST / GET
   try {
-    let fileUrl = req.query.url;
-    let userhash = req.query.userhash;
-
-    if (req.method === 'POST') {
-      const chunks = [];
-      for await (const chunk of req) {
-        chunks.push(chunk);
-      }
-      const body = Buffer.concat(chunks).toString();
-      try {
-        const parsed = JSON.parse(body);
-        if (parsed.url) fileUrl = parsed.url;
-        if (parsed.userhash) userhash = parsed.userhash;
-      } catch (e) {
-        // If not JSON, fall back to query
-      }
-    }
-
-    if (!fileUrl) {
-      return res.status(400).json({ error: 'Please provide a valid "url" parameter.' });
-    }
-
-    // Download attachment buffer from Facebook CDN
-    const fileResponse = await axios.get(fileUrl, {
-      responseType: 'arraybuffer',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-      }
+    // Parse incoming multipart/form-data
+    const form = formidable({
+      multiples: false,
+      keepExtensions: true,
     });
 
-    const buffer = Buffer.from(fileResponse.data);
-    const contentType = fileResponse.headers['content-type'] || 'image/jpeg';
-    
-    // Extracted extension or default to jpg
-    let ext = contentType.split('/')[1] || 'jpg';
-    if (ext.includes(';')) ext = ext.split(';')[0];
+    const [fields, files] = await form.parse(req);
 
-    const formData = new FormData();
-    formData.append('reqtype', 'fileupload');
-    if (userhash) formData.append('userhash', userhash);
+    const uploadedFile = Array.isArray(files.file)
+      ? files.file[0]
+      : files.file;
 
-    const blob = new Blob([buffer], { type: contentType });
-    formData.append('fileToUpload', blob, `file_${Date.now()}.${ext}`);
+    if (!uploadedFile) {
+      return res.status(400).json({
+        success: false,
+        error: "No file provided. Use field name: file",
+      });
+    }
+
+    // Read uploaded file
+    const fileStream = fs.createReadStream(uploadedFile.filepath);
+
+    // Create Catbox request
+    const catboxForm = new FormData();
+
+    catboxForm.append("reqtype", "fileupload");
+    catboxForm.append("fileToUpload", fileStream, {
+      filename: uploadedFile.originalFilename || "upload",
+      contentType: uploadedFile.mimetype || "application/octet-stream",
+    });
 
     // Upload to Catbox
-    const response = await axios.post('https://catbox.moe/user/api.php', formData, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0'
-      }
+    const response = await fetch("https://catbox.moe/user/api.php", {
+      method: "POST",
+      headers: catboxForm.getHeaders(),
+      body: catboxForm,
     });
 
-    const resultUrl = response.data.trim();
+    const result = await response.text();
 
-    if (resultUrl.startsWith('http')) {
-      return res.status(200).json({ status: true, url: resultUrl });
-    } else {
-      return res.status(500).json({ error: 'Catbox error', details: resultUrl });
+    if (!response.ok) {
+      return res.status(502).json({
+        success: false,
+        error: "Catbox upload failed",
+        details: result,
+      });
     }
 
+    // Catbox normally returns the URL as plain text
+    const url = result.trim();
+
+    // Delete temporary file
+    try {
+      fs.unlinkSync(uploadedFile.filepath);
+    } catch {}
+
+    return res.status(200).json({
+      success: true,
+      url,
+    });
+
   } catch (error) {
-    return res.status(500).json({ error: 'Upload failed', details: error.message });
+    console.error("Upload error:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "Upload failed",
+      details: error.message,
+    });
   }
 }
