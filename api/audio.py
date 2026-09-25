@@ -17,7 +17,9 @@ class handler(BaseHTTPRequestHandler):
             self.send_json(400, {"error": "URL পাওয়া যায়নি"})
             return
 
+        tmp_dir = None
         try:
+            # ১. থার্ড পার্টি API থেকে স্ট্রিম তথ্য বের করা
             api_endpoint = f"https://nayan-video-downloader.vercel.app/youtube?url={urllib.parse.quote(video_url)}"
             req = urllib.request.Request(api_endpoint, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
             
@@ -31,13 +33,13 @@ class handler(BaseHTTPRequestHandler):
             formats = res_data["data"].get("formats", [])
             download_url = None
 
-            # 1. Search for audio stream
+            # Audio স্ট্রিম খোঁজা
             for fmt in formats:
                 if fmt.get("type") == "audio" and fmt.get("url"):
                     download_url = fmt["url"]
                     break
 
-            # 2. Backup stream
+            # ব্যাকআপ স্ট্রিম
             if not download_url:
                 for fmt in formats:
                     if fmt.get("url"):
@@ -49,19 +51,23 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             tmp_dir = tempfile.mkdtemp(dir="/tmp")
+            input_file = os.path.join(tmp_dir, "input_media")
             output_mp3 = os.path.join(tmp_dir, "output.mp3")
 
-            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+            # ২. FFmpeg এ পাঠানোর আগে ফাইলটি /tmp ডিরেক্টরিতে পুরোপুরি ডাউনলোড করা
+            dl_req = urllib.request.Request(download_url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            })
+            
+            with urllib.request.urlopen(dl_req) as response, open(input_file, 'wb') as out_file:
+                out_file.write(response.read())
 
-            # Pass User-Agent & Reconnect flags to prevent HTTP 403 Forbidden
+            # ৩. লোকাল ফাইল ব্যবহার করে FFmpeg রান করা
+            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
             ffmpeg_cmd = [
                 ffmpeg_path,
                 "-y",
-                "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "-reconnect", "1",
-                "-reconnect_streamed", "1",
-                "-reconnect_delay_max", "5",
-                "-i", download_url,
+                "-i", input_file,
                 "-vn",
                 "-acodec", "libmp3lame",
                 "-ab", "128k",
@@ -77,6 +83,7 @@ class handler(BaseHTTPRequestHandler):
 
             filesize = os.path.getsize(output_mp3)
 
+            # Vercel Payload Limit Warning Check (~4.5MB)
             if filesize > 4500000:
                 self.send_json(400, {"error": "ফাইল সাইজ Vercel লিমিট (4.5MB) অতিক্রম করেছে"})
                 return
@@ -95,12 +102,13 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json(500, {"error": str(e)})
         finally:
-            try:
-                for f in glob.glob(os.path.join(tmp_dir, "*")):
-                    os.remove(f)
-                os.rmdir(tmp_dir)
-            except Exception:
-                pass
+            if tmp_dir and os.path.exists(tmp_dir):
+                try:
+                    for f in glob.glob(os.path.join(tmp_dir, "*")):
+                        os.remove(f)
+                    os.rmdir(tmp_dir)
+                except Exception:
+                    pass
 
     def send_json(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
