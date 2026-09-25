@@ -1,256 +1,156 @@
-import os
-import glob
-import json
-import tempfile
-import urllib.parse
 from http.server import BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs, quote
+import json
+import requests
 
-import yt_dlp
-import imageio_ffmpeg
+
+API_BASE = "https://nayan-video-downloader.vercel.app/youtube"
 
 
 class handler(BaseHTTPRequestHandler):
 
-    def do_GET(self):
-        query = urllib.parse.parse_qs(
-            urllib.parse.urlparse(self.path).query
-        )
-
-        video_url = query.get("url", [None])[0]
-
-        if not video_url:
-            self.send_json(400, {
-                "success": False,
-                "error": "URL পাওয়া যায়নি"
-            })
-            return
-
-        tmp_dir = tempfile.mkdtemp(dir="/tmp")
-        output_template = os.path.join(
-            tmp_dir,
-            "%(id)s.%(ext)s"
-        )
-
-        cookie_path = None
-
-        try:
-
-            # ==============================
-            # Cookies
-            # ==============================
-
-            cookies = os.environ.get("YT_COOKIES")
-
-            if cookies:
-                cookie_path = os.path.join(
-                    tmp_dir,
-                    "youtube_cookies.txt"
-                )
-
-                with open(
-                    cookie_path,
-                    "w",
-                    encoding="utf-8"
-                ) as f:
-                    f.write(cookies)
-
-            # ==============================
-            # yt-dlp
-            # ==============================
-
-            ydl_opts = {
-                "quiet": True,
-                "no_warnings": False,
-                "noplaylist": True,
-
-                # Try audio first
-                "format": (
-                    "bestaudio[ext=m4a]/"
-                    "bestaudio[ext=webm]/"
-                    "bestaudio/"
-                    "best"
-                ),
-
-                "outtmpl": output_template,
-
-                "ffmpeg_location":
-                    imageio_ffmpeg.get_ffmpeg_exe(),
-
-                # IMPORTANT
-                # Do not force android / ios
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": [
-                            "default",
-                            "web_embedded"
-                        ]
-                    }
-                },
-
-                "retries": 3,
-                "fragment_retries": 3,
-
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }],
-            }
-
-            # ==============================
-            # Add cookies
-            # ==============================
-
-            if cookie_path and os.path.exists(cookie_path):
-                ydl_opts["cookiefile"] = cookie_path
-
-            # ==============================
-            # Download
-            # ==============================
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
-                info = ydl.extract_info(
-                    video_url,
-                    download=True
-                )
-
-            # ==============================
-            # Find output
-            # ==============================
-
-            files = glob.glob(
-                os.path.join(tmp_dir, "*")
-            )
-
-            mp3_files = [
-                f for f in files
-                if f.lower().endswith(".mp3")
-            ]
-
-            if not mp3_files:
-
-                self.send_json(500, {
-                    "success": False,
-                    "error": "MP3 তৈরি হয়নি",
-                    "files": [
-                        os.path.basename(f)
-                        for f in files
-                    ]
-                })
-
-                return
-
-            filepath = mp3_files[0]
-
-            filesize = os.path.getsize(filepath)
-
-            # ==============================
-            # Vercel response limit
-            # ==============================
-
-            if filesize > 4500000:
-
-                self.send_json(400, {
-                    "success": False,
-                    "error": (
-                        "ফাইল সাইজ Vercel-এর "
-                        "4.5MB response limit-এর বেশি"
-                    ),
-                    "size": filesize
-                })
-
-                return
-
-            # ==============================
-            # Send MP3
-            # ==============================
-
-            with open(filepath, "rb") as f:
-                data = f.read()
-
-            self.send_response(200)
-
-            self.send_header(
-                "Content-Type",
-                "audio/mpeg"
-            )
-
-            self.send_header(
-                "Content-Disposition",
-                'attachment; filename="audio.mp3"'
-            )
-
-            self.send_header(
-                "Access-Control-Allow-Origin",
-                "*"
-            )
-
-            self.send_header(
-                "Content-Length",
-                str(len(data))
-            )
-
-            self.end_headers()
-
-            self.wfile.write(data)
-
-        except yt_dlp.utils.DownloadError as e:
-
-            self.send_json(500, {
-                "success": False,
-                "error": str(e)
-            })
-
-        except Exception as e:
-
-            self.send_json(500, {
-                "success": False,
-                "error": str(e)
-            })
-
-        finally:
-
-            try:
-
-                for f in glob.glob(
-                    os.path.join(tmp_dir, "*")
-                ):
-                    os.remove(f)
-
-                os.rmdir(tmp_dir)
-
-            except Exception:
-                pass
-
-    # ==============================
-    # JSON helper
-    # ==============================
-
-    def send_json(self, status, data):
-
-        body = json.dumps(
-            data,
-            ensure_ascii=False
-        ).encode("utf-8")
+    def send_json(self, data, status=200):
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
 
         self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-        self.send_header(
-            "Content-Type",
-            "application/json; charset=utf-8"
-        )
-
-        self.send_header(
-            "Access-Control-Allow-Origin",
-            "*"
-        )
-
-        self.send_header(
-            "Content-Length",
-            str(len(body))
-        )
-
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
 
-        self.wfile.write(body)
+    def do_GET(self):
+        try:
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+
+            youtube_url = params.get("url", [None])[0]
+
+            if not youtube_url:
+                return self.send_json({
+                    "success": False,
+                    "error": "Missing url parameter"
+                }, 400)
+
+            # Call your API
+            api_url = API_BASE + "?url=" + quote(
+                youtube_url,
+                safe=""
+            )
+
+            response = requests.get(
+                api_url,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0"
+                },
+                timeout=60
+            )
+
+            if response.status_code != 200:
+                return self.send_json({
+                    "success": False,
+                    "error": "Downloader API returned HTTP "
+                             + str(response.status_code),
+                    "details": response.text[:1000]
+                }, 502)
+
+            try:
+                data = response.json()
+            except Exception:
+                return self.send_json({
+                    "success": False,
+                    "error": "Downloader API did not return JSON",
+                    "details": response.text[:1000]
+                }, 502)
+
+            # Try to find audio/download URL recursively
+            audio_url = find_audio_url(data)
+
+            if not audio_url:
+                return self.send_json({
+                    "success": False,
+                    "error": "Audio URL not found in API response",
+                    "api_response": data
+                }, 502)
+
+            # Return a clean response
+            return self.send_json({
+                "success": True,
+                "audio": audio_url,
+                "source": youtube_url
+            })
+
+        except requests.exceptions.Timeout:
+            return self.send_json({
+                "success": False,
+                "error": "Downloader API timeout"
+            }, 504)
+
+        except Exception as e:
+            return self.send_json({
+                "success": False,
+                "error": str(e)
+            }, 500)
+
+
+def find_audio_url(obj):
+    """
+    Recursively search JSON for an audio/download URL.
+    """
+
+    preferred_keys = [
+        "audio",
+        "audio_url",
+        "audioUrl",
+        "download",
+        "download_url",
+        "downloadUrl",
+        "url",
+        "link"
+    ]
+
+    if isinstance(obj, dict):
+
+        # First check preferred keys
+        for key in preferred_keys:
+            if key in obj:
+                value = obj[key]
+
+                if isinstance(value, str):
+                    if value.startswith("http://") or value.startswith("https://"):
+                        return value
+
+                elif isinstance(value, dict):
+                    result = find_audio_url(value)
+                    if result:
+                        return result
+
+        # Then recursively search everything
+        for value in obj.values():
+            result = find_audio_url(value)
+            if result:
+                return result
+
+    elif isinstance(obj, list):
+
+        for item in obj:
+            result = find_audio_url(item)
+            if result:
+                return result
+
+    elif isinstance(obj, str):
+
+        if obj.startswith("http://") or obj.startswith("https://"):
+            return obj
+
+    return None
