@@ -34,12 +34,14 @@ class handler(BaseHTTPRequestHandler):
         cookie_path = None
 
         try:
-            # =========================
-            # YouTube Cookies
-            # =========================
-            yt_cookies_data = os.environ.get("YT_COOKIES")
 
-            if yt_cookies_data:
+            # ==============================
+            # Cookies
+            # ==============================
+
+            cookies = os.environ.get("YT_COOKIES")
+
+            if cookies:
                 cookie_path = os.path.join(
                     tmp_dir,
                     "youtube_cookies.txt"
@@ -50,17 +52,18 @@ class handler(BaseHTTPRequestHandler):
                     "w",
                     encoding="utf-8"
                 ) as f:
-                    f.write(yt_cookies_data)
+                    f.write(cookies)
 
-            # =========================
-            # yt-dlp configuration
-            # =========================
+            # ==============================
+            # yt-dlp
+            # ==============================
+
             ydl_opts = {
                 "quiet": True,
-                "no_warnings": True,
+                "no_warnings": False,
                 "noplaylist": True,
 
-                # Audio format fallback
+                # Try audio first
                 "format": (
                     "bestaudio[ext=m4a]/"
                     "bestaudio[ext=webm]/"
@@ -73,21 +76,20 @@ class handler(BaseHTTPRequestHandler):
                 "ffmpeg_location":
                     imageio_ffmpeg.get_ffmpeg_exe(),
 
-                # Don't force android / ios clients
+                # IMPORTANT
+                # Do not force android / ios
                 "extractor_args": {
                     "youtube": {
                         "player_client": [
-                            "web_embedded",
-                            "default"
+                            "default",
+                            "web_embedded"
                         ]
                     }
                 },
 
-                # Avoid unnecessary downloads
                 "retries": 3,
                 "fragment_retries": 3,
 
-                # Audio conversion
                 "postprocessors": [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
@@ -95,101 +97,122 @@ class handler(BaseHTTPRequestHandler):
                 }],
             }
 
-            # Add cookies only when available
+            # ==============================
+            # Add cookies
+            # ==============================
+
             if cookie_path and os.path.exists(cookie_path):
                 ydl_opts["cookiefile"] = cookie_path
 
-            # =========================
+            # ==============================
             # Download
-            # =========================
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([video_url])
+            # ==============================
 
-            # =========================
-            # Find generated MP3
-            # =========================
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+
+                info = ydl.extract_info(
+                    video_url,
+                    download=True
+                )
+
+            # ==============================
+            # Find output
+            # ==============================
+
             files = glob.glob(
                 os.path.join(tmp_dir, "*")
             )
 
-            if not files:
-                self.send_json(500, {
-                    "success": False,
-                    "error": "অডিও ফাইল তৈরি হতে পারেনি"
-                })
-                return
-
-            # Prefer MP3
             mp3_files = [
                 f for f in files
                 if f.lower().endswith(".mp3")
             ]
 
-            filepath = (
-                mp3_files[0]
-                if mp3_files
-                else files[0]
-            )
+            if not mp3_files:
+
+                self.send_json(500, {
+                    "success": False,
+                    "error": "MP3 তৈরি হয়নি",
+                    "files": [
+                        os.path.basename(f)
+                        for f in files
+                    ]
+                })
+
+                return
+
+            filepath = mp3_files[0]
 
             filesize = os.path.getsize(filepath)
 
-            # =========================
+            # ==============================
             # Vercel response limit
-            # =========================
+            # ==============================
+
             if filesize > 4500000:
+
                 self.send_json(400, {
                     "success": False,
                     "error": (
-                        "ফাইল সাইজ Vercel 4.5MB "
-                        "লিমিট অতিক্রম করেছে"
-                    )
+                        "ফাইল সাইজ Vercel-এর "
+                        "4.5MB response limit-এর বেশি"
+                    ),
+                    "size": filesize
                 })
+
                 return
 
-            # =========================
-            # Send audio
-            # =========================
+            # ==============================
+            # Send MP3
+            # ==============================
+
             with open(filepath, "rb") as f:
                 data = f.read()
 
             self.send_response(200)
+
             self.send_header(
                 "Content-Type",
                 "audio/mpeg"
             )
+
             self.send_header(
                 "Content-Disposition",
                 'attachment; filename="audio.mp3"'
             )
+
             self.send_header(
                 "Access-Control-Allow-Origin",
                 "*"
             )
+
             self.send_header(
                 "Content-Length",
                 str(len(data))
             )
+
             self.end_headers()
 
             self.wfile.write(data)
 
         except yt_dlp.utils.DownloadError as e:
+
             self.send_json(500, {
                 "success": False,
                 "error": str(e)
             })
 
         except Exception as e:
+
             self.send_json(500, {
                 "success": False,
                 "error": str(e)
             })
 
         finally:
-            # =========================
-            # Cleanup
-            # =========================
+
             try:
+
                 for f in glob.glob(
                     os.path.join(tmp_dir, "*")
                 ):
@@ -200,10 +223,12 @@ class handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    # =============================
-    # JSON response helper
-    # =============================
+    # ==============================
+    # JSON helper
+    # ==============================
+
     def send_json(self, status, data):
+
         body = json.dumps(
             data,
             ensure_ascii=False
