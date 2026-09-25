@@ -5,6 +5,7 @@ import tempfile
 import urllib.parse
 import urllib.request
 import subprocess
+import imageio_ffmpeg
 from http.server import BaseHTTPRequestHandler
 
 class handler(BaseHTTPRequestHandler):
@@ -17,7 +18,6 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
-            # 외부 API কল করে তথ্য আনা
             api_endpoint = f"https://nayan-video-downloader.vercel.app/youtube?url={urllib.parse.quote(video_url)}"
             req = urllib.request.Request(api_endpoint, headers={'User-Agent': 'Mozilla/5.0'})
             
@@ -31,13 +31,13 @@ class handler(BaseHTTPRequestHandler):
             formats = res_data["data"].get("formats", [])
             download_url = None
 
-            # ১. প্রথমে audio ফরম্যাট খুঁজে বের করা (medium/low quality)
+            # 1. Audio stream search
             for fmt in formats:
                 if fmt.get("type") == "audio" and fmt.get("url"):
                     download_url = fmt["url"]
                     break
 
-            # ২. অডিও না পেলে 240p/144p ভিডিও স্ট্রিম থেকে ব্যাকআপ নেওয়া
+            # 2. Backup stream search
             if not download_url:
                 for fmt in formats:
                     if fmt.get("url"):
@@ -48,13 +48,15 @@ class handler(BaseHTTPRequestHandler):
                 self.send_json(404, {"error": "কোন ডাউনলোডেবল স্ট্রিম পাওয়া যায়নি"})
                 return
 
-            # Temporary Directory তৈরি
             tmp_dir = tempfile.mkdtemp(dir="/tmp")
             output_mp3 = os.path.join(tmp_dir, "output.mp3")
 
-            # FFmpeg দিয়ে সরাসরি URL থেকে অডিও কনভার্ট করা
+            # Get FFmpeg executable path from imageio_ffmpeg
+            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+
+            # Execute FFmpeg command using imageio_ffmpeg path
             ffmpeg_cmd = [
-                "ffmpeg",
+                ffmpeg_path,
                 "-y",
                 "-i", download_url,
                 "-vn",
@@ -72,7 +74,6 @@ class handler(BaseHTTPRequestHandler):
 
             filesize = os.path.getsize(output_mp3)
 
-            # Vercel লিমিট চেক (4.5MB)
             if filesize > 4500000:
                 self.send_json(400, {"error": "ফাইল সাইজ Vercel লিমিট (4.5MB) অতিক্রম করেছে"})
                 return
