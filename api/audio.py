@@ -27,18 +27,18 @@ class handler(BaseHTTPRequestHandler):
             with open(cookie_path, 'w', encoding='utf-8') as f:
                 f.write(yt_cookies_data)
 
-        # yt-dlp কনফিগারেশন (ফরম্যাট ফিলব্যাক সাপোর্ট সহ)
+        # yt-dlp কনফিগারেশন (ক্লায়েন্ট ও ফরম্যাট অপ্টিমাইজড)
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            # প্রথমে সেরা অডিও, তা না পেলে সবচেয়ে ছোট ভিডিও স্ট্রিম নিবে
-            'format': 'bestaudio/best/worst',
+            # অডিও বা ভিডিও যেকোনো স্ট্রিম থেকে অডিও বের করার অনুমতি
+            'format': 'bestaudio/best',
             'outtmpl': output_template,
             'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['mweb', 'ios', 'android']
+                    'player_client': ['web', 'mweb', 'android', 'ios']
                 }
             },
             'postprocessors': [{
