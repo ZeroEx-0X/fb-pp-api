@@ -19,7 +19,7 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             api_endpoint = f"https://nayan-video-downloader.vercel.app/youtube?url={urllib.parse.quote(video_url)}"
-            req = urllib.request.Request(api_endpoint, headers={'User-Agent': 'Mozilla/5.0'})
+            req = urllib.request.Request(api_endpoint, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
             
             with urllib.request.urlopen(req) as response:
                 res_data = json.loads(response.read().decode('utf-8'))
@@ -31,13 +31,13 @@ class handler(BaseHTTPRequestHandler):
             formats = res_data["data"].get("formats", [])
             download_url = None
 
-            # 1. Audio stream search
+            # 1. Search for audio stream
             for fmt in formats:
                 if fmt.get("type") == "audio" and fmt.get("url"):
                     download_url = fmt["url"]
                     break
 
-            # 2. Backup stream search
+            # 2. Backup stream
             if not download_url:
                 for fmt in formats:
                     if fmt.get("url"):
@@ -51,13 +51,16 @@ class handler(BaseHTTPRequestHandler):
             tmp_dir = tempfile.mkdtemp(dir="/tmp")
             output_mp3 = os.path.join(tmp_dir, "output.mp3")
 
-            # Get FFmpeg executable path from imageio_ffmpeg
             ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 
-            # Execute FFmpeg command using imageio_ffmpeg path
+            # Pass User-Agent & Reconnect flags to prevent HTTP 403 Forbidden
             ffmpeg_cmd = [
                 ffmpeg_path,
                 "-y",
+                "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
                 "-i", download_url,
                 "-vn",
                 "-acodec", "libmp3lame",
