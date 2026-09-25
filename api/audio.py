@@ -27,12 +27,13 @@ class handler(BaseHTTPRequestHandler):
             with open(cookie_path, 'w', encoding='utf-8') as f:
                 f.write(yt_cookies_data)
 
-        # yt-dlp কনফিগারেশন
+        # yt-dlp কনফিগারেশন (ফরম্যাট ফিলব্যাক সাপোর্ট সহ)
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'format': 'bestaudio/best',
+            # প্রথমে সেরা অডিও, তা না পেলে সবচেয়ে ছোট ভিডিও স্ট্রিম নিবে
+            'format': 'bestaudio/best/worst',
             'outtmpl': output_template,
             'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
             'extractor_args': {
