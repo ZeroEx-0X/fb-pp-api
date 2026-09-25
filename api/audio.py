@@ -13,28 +13,33 @@ class handler(BaseHTTPRequestHandler):
         video_url = query.get('url', [None])[0]
 
         if not video_url:
-            self.send_json(400, {"error": "URL ntiyabonetse"})
+            self.send_json(400, {"error": "URL পাওয়া যায়নি"})
             return
 
         tmp_dir = tempfile.mkdtemp(dir="/tmp")
         output_template = os.path.join(tmp_dir, "%(id)s.%(ext)s")
         cookie_path = None
 
-        # Gukoresha Cookies zivuye mu Variable y'Ikirere (Environment Variable)
+        # Environment Variable থেকে Cookies পড়া
         yt_cookies_data = os.environ.get('YT_COOKIES')
         if yt_cookies_data:
             cookie_path = os.path.join(tmp_dir, "youtube_cookies.txt")
             with open(cookie_path, 'w', encoding='utf-8') as f:
                 f.write(yt_cookies_data)
 
-        # Amahitamo ya yt-dlp
+        # yt-dlp কনফিগারেশন
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'format': 'bestaudio',
+            'format': 'bestaudio/best',
             'outtmpl': output_template,
             'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['mweb', 'ios', 'android']
+                }
+            },
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -51,15 +56,15 @@ class handler(BaseHTTPRequestHandler):
 
             files = glob.glob(os.path.join(tmp_dir, "*"))
             if not files:
-                self.send_json(500, {"error": "Inyandiko y'amajwi ntiyashoboye kuboneka"})
+                self.send_json(500, {"error": "অডিও ফাইল তৈরি হতে পারেনি"})
                 return
 
             filepath = files[0]
             filesize = os.path.getsize(filepath)
 
-            # Umupaka wa Vercel ni 4.5 MB
+            # Vercel Response Limit: 4.5MB
             if filesize > 4500000:
-                self.send_json(400, {"error": "Inyandiko irarenze umupaka wa Vercel (4.5MB)"})
+                self.send_json(400, {"error": "ফাইল সাইজ Vercel লিমিট (4.5MB) অতিক্রম করেছে"})
                 return
 
             with open(filepath, "rb") as f:
