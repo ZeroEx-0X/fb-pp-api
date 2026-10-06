@@ -1,7 +1,71 @@
 import axios from "axios";
-import qs from "qs";
+import * as cheerio from "cheerio";
+
+async function findUid(link) {
+  try {
+    const response = await axios.post(
+      "https://seomagnifier.com/fbid",
+      new URLSearchParams({
+        facebook: "1",
+        sitelink: link
+      }),
+      {
+        headers: {
+          "content-type":
+            "application/x-www-form-urlencoded; charset=UTF-8",
+
+          "Cookie":
+            "PHPSESSID=0d8feddd151431cf35ccb0522b056dc6"
+        }
+      }
+    );
+
+    const id = response.data;
+
+    // Seomagnifier থেকে numeric UID পাওয়া গেলে
+    if (!isNaN(id)) {
+      return String(id).trim();
+    }
+
+    // Seomagnifier fail করলে Facebook page থেকে try করবে
+    const html = await axios.get(link, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+          "AppleWebKit/537.36 (KHTML, like Gecko) " +
+          "Chrome/124.0.0.0 Safari/537.36"
+      }
+    });
+
+    const $ = cheerio.load(html.data);
+
+    const el =
+      $('meta[property="al:android:url"]').attr("content") ||
+      $('meta[name="al:android:url"]').attr("content");
+
+    if (!el) {
+      throw new Error("UID not found");
+    }
+
+    const number = el.split("/").pop();
+
+    if (!number || isNaN(number)) {
+      throw new Error("UID not found");
+    }
+
+    return number;
+
+  } catch (error) {
+    throw new Error(
+      error.message ||
+      "An unexpected error occurred. Please try again."
+    );
+  }
+}
 
 export default async function handler(req, res) {
+
+  // Only GET
   if (req.method !== "GET") {
     return res.status(405).json({
       status: "error",
@@ -11,128 +75,62 @@ export default async function handler(req, res) {
 
   const { link } = req.query;
 
+  // Link missing
   if (!link) {
     return res.status(400).json({
       status: "error",
-      message: "Link is required."
+      message:
+        "Link is required. Example: /api/fb-uid?link=https://facebook.com/zuck"
     });
   }
 
   try {
-    const userAgent =
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-      "AppleWebKit/537.36 (KHTML, like Gecko) " +
-      "Chrome/124.0.0.0 Safari/537.36";
 
-    // ------------------------------------------------
-    // 1. First visit the website and get a NEW session
-    // ------------------------------------------------
-    const sessionResponse = await axios.get(
-      "https://id.traodoisub.com/",
-      {
-        headers: {
-          "User-Agent": userAgent,
-          "Accept":
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-          "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-          "Cache-Control": "no-cache"
-        },
-        timeout: 15000,
-        validateStatus: () => true
-      }
-    );
+    // Facebook URL check
+    const url = new URL(link);
 
-    // Get Set-Cookie headers
-    const setCookies = sessionResponse.headers["set-cookie"] || [];
+    const allowedHosts = [
+      "facebook.com",
+      "www.facebook.com",
+      "m.facebook.com"
+    ];
 
-    let phpSession = null;
-
-    for (const cookie of setCookies) {
-      const match = cookie.match(/PHPSESSID=([^;]+)/i);
-
-      if (match) {
-        phpSession = match[1];
-        break;
-      }
-    }
-
-    // ------------------------------------------------
-    // 2. If PHPSESSID wasn't returned, stop
-    // ------------------------------------------------
-    if (!phpSession) {
-      return res.status(502).json({
+    if (!allowedHosts.includes(url.hostname.toLowerCase())) {
+      return res.status(400).json({
         status: "error",
-        message: "Could not create a new PHP session.",
-        details: "PHPSESSID was not returned by id.traodoisub.com"
+        message: "Only Facebook URLs are supported."
       });
     }
 
-    // ------------------------------------------------
-    // 3. Send the UID request using the NEW session
-    // ------------------------------------------------
-    const postData = qs.stringify({
+    // Find UID
+    const id = await findUid(link);
+
+    return res.status(200).json({
+      status: "success",
+      id: id,
       link: link
     });
 
-    const apiResponse = await axios.post(
-      "https://id.traodoisub.com/api.php",
-      postData,
-      {
-        headers: {
-          "Content-Type":
-            "application/x-www-form-urlencoded; charset=UTF-8",
+  } catch (error) {
 
-          "Cookie": `PHPSESSID=${phpSession}`,
-
-          "User-Agent": userAgent,
-
-          "Accept": "application/json, text/javascript, */*; q=0.01",
-
-          "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-
-          "Origin": "https://id.traodoisub.com",
-
-          "Referer": "https://id.traodoisub.com/",
-
-          "X-Requested-With": "XMLHttpRequest",
-
-          "Cache-Control": "no-cache"
-        },
-
-        timeout: 15000,
-
-        validateStatus: () => true
-      }
-    );
-
-    // ------------------------------------------------
-    // 4. Return successful UID
-    // ------------------------------------------------
-    if (apiResponse.data && apiResponse.data.id) {
-      return res.status(200).json({
-        status: "success",
-        id: apiResponse.data.id,
-        link: link
-      });
-    }
-
-    // ------------------------------------------------
-    // 5. Return upstream error
-    // ------------------------------------------------
-    return res.status(400).json({
-      status: "error",
-      message:
-        apiResponse.data?.error ||
-        apiResponse.data?.message ||
-        "Could not extract Facebook UID.",
-      upstream: apiResponse.data
-    });
-
-  } catch (err) {
     return res.status(500).json({
       status: "error",
-      message: "Internal Server Error",
-      details: err.message
+      message: error.message || "Failed to find Facebook UID."
     });
   }
 }
+
+"package.json"-এ শুধু এগুলো থাকলেই হবে:
+
+{
+  "dependencies": {
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0"
+  }
+}
+
+তারপর test:
+
+https://YOUR-DOMAIN.vercel.app/api/fb-uid?link=https://www.facebook.com/Adi.0X
+
+⚠️ একটা বিষয়: তোমার দেওয়া "PHPSESSID" যদি expired/invalid হয়ে থাকে, তাহলে একই code হলেও Seomagnifier থেকে UID আসবে না। নতুন session cookie প্রয়োজন হলে hard-coded পুরোনো cookie কাজ করবে না।
