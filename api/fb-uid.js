@@ -120,17 +120,3 @@ export default async function handler(req, res) {
   }
 }
 
-"package.json"-এ শুধু এগুলো থাকলেই হবে:
-
-{
-  "dependencies": {
-    "axios": "^1.7.9",
-    "cheerio": "^1.0.0"
-  }
-}
-
-তারপর test:
-
-https://YOUR-DOMAIN.vercel.app/api/fb-uid?link=https://www.facebook.com/Adi.0X
-
-⚠️ একটা বিষয়: তোমার দেওয়া "PHPSESSID" যদি expired/invalid হয়ে থাকে, তাহলে একই code হলেও Seomagnifier থেকে UID আসবে না। নতুন session cookie প্রয়োজন হলে hard-coded পুরোনো cookie কাজ করবে না।
